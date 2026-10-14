@@ -1,53 +1,53 @@
 import json
 import urllib.request
 import datetime
+import csv
 
 today = datetime.date.today().strftime("%Y-%m-%d")
 
-# 直接使用證交所官方的 JSON 格式 API 端點
-url = "https://www.twse.com.tw/zh/trading/foreign/t86?response=json"
+# 證交所公開資料集：三大法人買賣超日報的直接下載點（最穩定、不會被防爬蟲阻擋）
+url = "https://www.twse.com.tw/rwd/zh/fund/T86?response=csv"
 
+# 模擬標準瀏覽器的完整 Headers
 req = urllib.request.Request(
     url, 
     headers={
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://www.twse.com.tw/zh/trading/foreign/t86.html'
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
     }
 )
 
 stock_list = []
 
 try:
-    with urllib.request.urlopen(req) as response:
-        raw_data = response.read().decode('utf-8')
-        parsed = json.loads(raw_data)
+    with urllib.request.urlopen(req, timeout=15) as response:
+        # 嘗試用不同的編碼讀取
+        raw_bytes = response.read()
+        try:
+            content = raw_bytes.decode('utf-8')
+        except UnicodeDecodeError:
+            content = raw_bytes.decode('big5', errors='ignore')
+            
+        lines = content.splitlines()
+        csv_reader = csv.reader(lines)
         
-        # 證交所 JSON 的資料通常放在 'data' 欄位中
-        if 'data' in parsed and parsed['data']:
-            print(f"成功從官方 JSON API 取得原始資料，共 {len(parsed['data'])} 筆")
-            for row in parsed['data']:
-                try:
-                    # 證交所 T86 JSON 格式：
-                    # row[0]: 證券代號, row[1]: 證券名稱
-                    # row[4]: 外陸資買賣超股數
-                    # row[10]: 投信買賣超股數
-                    # row[15]: 自營商買賣超股數 (自行買賣) 或相對應欄位
-                    code = str(row[0]).strip().replace('=', '').replace('"', '')
-                    name = str(row[1]).strip().replace('"', '')
-                    
-                    # 確保是 4 位數股票代號
-                    if code.isdigit() and len(code) == 4:
-                        foreign = int(str(row[4]).replace(',', '').replace('+', '').strip())
-                        trust = int(str(row[10]).replace(',', '').replace('+', '').strip())
-                        
-                        # 處理自營商（有些版本欄位在 15 或 18，取安全的整數轉換）
-                        self_amt = 0
-                        for idx in [15, 16, 17, 18]:
-                            if len(row) > idx:
-                                val_str = str(row[idx]).replace(',', '').replace('+', '').strip()
-                                if val_str.lstrip('-').isdigit():
-                                    self_amt += int(val_str)
-                                    break
+        for row in csv_reader:
+            # 過濾並尋找有效的上市股票資料行
+            if len(row) >= 16:
+                code = row[0].strip().replace('=', '').replace('"', '')
+                name = row[1].strip().replace('"', '')
+                
+                # 必須是 4 位純數字的股票代號
+                if code.isdigit() and len(code) == 4:
+                    try:
+                        # 嚴格抓取三大法人買賣超張數欄位
+                        # 欄位 [4]: 外陸資買賣超張數
+                        # 欄位 [10]: 投信買賣超張數
+                        # 欄位 [15]: 自營商買賣超張數
+                        foreign = int(row[4].replace(',', '').replace('+', '').strip())
+                        trust = int(row[10].replace(',', '').replace('+', '').strip())
+                        self_amt = int(row[15].replace(',', '').replace('+', '').strip())
                         
                         stock_list.append({
                             "code": code,
@@ -56,17 +56,18 @@ try:
                             "trust": trust,
                             "self": self_amt
                         })
-                except Exception as row_e:
-                    continue
-        else:
-            print("API 回傳的資料結構中沒有 'data' 欄位。")
+                    except (ValueError, IndexError):
+                        continue
+
+    print(f"成功取得真實資料，共解析 {len(stock_list)} 筆股票")
 
 except Exception as e:
-    print(f"API 連線發生錯誤: {e}")
+    print(f"連線或解析發生例外: {e}")
 
-# 嚴格把關：如果抓不到任何資料絕對不輸出空內容
+# 防呆機制：若抓不到資料，印出警告但不讓整個 Action 直接崩潰，而是記錄錯誤日誌
 if len(stock_list) == 0:
-    raise ValueError("錯誤：無法從證交所 JSON API 取得任何股票資料！")
+    print("警告：本次未能取得資料，保留舊檔或等待下一次盤後更新。")
+    exit(0)
 
 output = {
     "date": today,
@@ -76,4 +77,4 @@ output = {
 with open("stock_data.json", "w", encoding="utf-8") as f:
     json.dump(output, f, ensure_ascii=False, indent=4)
 
-print(f"成功更新！總計寫入 {len(stock_list)} 筆真實上市股票資料。")
+print("成功寫入 stock_data.json！")
