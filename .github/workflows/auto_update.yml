@@ -1,0 +1,31 @@
+name: Auto Update Stock Data
+
+on:
+  schedule:
+    - cron: '0 10 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 簽出專案程式碼
+        uses: actions/checkout@v4
+
+      - name: 設定 Python 環境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 執行爬蟲抓取真實台股資料
+        run: python update_stock.py
+
+      - name: 自動提交並推送到 GitHub
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          git add stock_data.json
+          git commit -m "Auto-update real stock data [skip ci]" || exit 0
+          git push
