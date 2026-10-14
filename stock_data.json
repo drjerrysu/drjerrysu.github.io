@@ -6,49 +6,49 @@
             "name": "台泥",
             "foreign": 6077127,
             "trust": 5637000,
-            "self": 2432708
+            "self": 15954615
         },
         {
             "code": "1102",
             "name": "亞泥",
             "foreign": 4719202,
             "trust": -189000,
-            "self": 72455
+            "self": 4636112
         },
         {
             "code": "1103",
             "name": "嘉泥",
             "foreign": 176999,
             "trust": 0,
-            "self": 0
+            "self": 176999
         },
         {
             "code": "1108",
             "name": "幸福",
             "foreign": 61000,
             "trust": 0,
-            "self": 0
+            "self": 61000
         },
         {
             "code": "1104",
             "name": "環泥",
             "foreign": 60941,
             "trust": 0,
-            "self": 0
+            "self": 60941
         },
         {
             "code": "1109",
             "name": "信大",
             "foreign": 5000,
             "trust": 0,
-            "self": 0
+            "self": 5000
         },
         {
             "code": "1110",
             "name": "東泥",
             "foreign": -10000,
             "trust": 0,
-            "self": 0
+            "self": -10000
         }
     ]
 }
