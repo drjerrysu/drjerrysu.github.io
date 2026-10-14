@@ -1,17 +1,17 @@
 import json
 import urllib.request
 import datetime
-import csv
 
 today = datetime.date.today().strftime("%Y-%m-%d")
 
-# 證交所三大法人買賣超日報 CSV 端點
-url = "https://www.twse.com.tw/rwd/zh/fund/T86?response=csv"
+# 直接使用證交所官方的 JSON 格式 API 端點
+url = "https://www.twse.com.tw/zh/trading/foreign/t86?response=json"
 
 req = urllib.request.Request(
     url, 
     headers={
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://www.twse.com.tw/zh/trading/foreign/t86.html'
     }
 )
 
@@ -19,44 +19,36 @@ stock_list = []
 
 try:
     with urllib.request.urlopen(req) as response:
-        content = response.read().decode('big5', errors='ignore')
-        lines = content.splitlines()
+        raw_data = response.read().decode('utf-8')
+        parsed = json.loads(raw_data)
         
-        csv_reader = csv.reader(lines)
-        for row in csv_reader:
-            # 證交所 T86 真正的股票資料行：欄位數通常大於 16，且第一欄是 4 位數字的股票代號
-            if len(row) >= 16:
-                code = row[0].strip().replace('"', '').replace('=', '')
-                name = row[1].strip().replace('"', '')
-                
-                # 嚴格過濾：必須是 4 位純數字的股票代號（排除中文標題行與市場總計行）
-                if code.isdigit() and len(code) == 4:
-                    try:
-                        # 依照證交所官方 T86 CSV 實際欄位對應：
-                        # [2] 證券名稱 (通常row[1]是代號或名稱，依實際結構調整)
-                        # 我們直接抓取數值欄位：外資[4], 投信[10], 自營商(自行買賣+避險)合併計算或取[15]
-                        # 為了保險，我們針對數值型欄位進行安全的整數轉換
+        # 證交所 JSON 的資料通常放在 'data' 欄位中
+        if 'data' in parsed and parsed['data']:
+            print(f"成功從官方 JSON API 取得原始資料，共 {len(parsed['data'])} 筆")
+            for row in parsed['data']:
+                try:
+                    # 證交所 T86 JSON 格式：
+                    # row[0]: 證券代號, row[1]: 證券名稱
+                    # row[4]: 外陸資買賣超股數
+                    # row[10]: 投信買賣超股數
+                    # row[15]: 自營商買賣超股數 (自行買賣) 或相對應欄位
+                    code = str(row[0]).strip().replace('=', '').replace('"', '')
+                    name = str(row[1]).strip().replace('"', '')
+                    
+                    # 確保是 4 位數股票代號
+                    if code.isdigit() and len(code) == 4:
+                        foreign = int(str(row[4]).replace(',', '').replace('+', '').strip())
+                        trust = int(str(row[10]).replace(',', '').replace('+', '').strip())
                         
-                        # 尋找含有數字的欄位進行解析
-                        numeric_vals = []
-                        for val in row[2:]:
-                            clean_val = val.replace(',', '').replace('"', '').strip()
-                            # 嘗試轉成整數
-                            try:
-                                numeric_vals.append(int(clean_val))
-                            except ValueError:
-                                continue
+                        # 處理自營商（有些版本欄位在 15 或 18，取安全的整數轉換）
+                        self_amt = 0
+                        for idx in [15, 16, 17, 18]:
+                            if len(row) > idx:
+                                val_str = str(row[idx]).replace(',', '').replace('+', '').strip()
+                                if val_str.lstrip('-').isdigit():
+                                    self_amt += int(val_str)
+                                    break
                         
-                        # T86 標準格式中，外資、投信、自營商買賣超張數有固定相對位置
-                        # 讓我們直接抓取確切欄位：
-                        foreign = int(row[4].replace(',', '').strip())
-                        trust = int(row[10].replace(',', '').strip())
-                        
-                        # 自營商通常分自行買賣與避險，我們將後面的數值加總或取主要欄位
-                        self_1 = int(row[15].replace(',', '').strip()) if len(row) > 15 and row[15].replace(',', '').strip().lstrip('-').isdigit() else 0
-                        self_2 = int(row[18].replace(',', '').strip()) if len(row) > 18 and row[18].replace(',', '').strip().lstrip('-').isdigit() else 0
-                        self_amt = self_1 + self_2
-
                         stock_list.append({
                             "code": code,
                             "name": name,
@@ -64,16 +56,17 @@ try:
                             "trust": trust,
                             "self": self_amt
                         })
-                    except Exception as parse_e:
-                        continue
-
-    print(f"成功完整解析證交所真實上市股票，共 {len(stock_list)} 筆")
+                except Exception as row_e:
+                    continue
+        else:
+            print("API 回傳的資料結構中沒有 'data' 欄位。")
 
 except Exception as e:
-    print(f"抓取失敗: {e}")
+    print(f"API 連線發生錯誤: {e}")
 
+# 嚴格把關：如果抓不到任何資料絕對不輸出空內容
 if len(stock_list) == 0:
-    raise ValueError("錯誤：未能取得任何證交所股票資料！")
+    raise ValueError("錯誤：無法從證交所 JSON API 取得任何股票資料！")
 
 output = {
     "date": today,
@@ -83,4 +76,4 @@ output = {
 with open("stock_data.json", "w", encoding="utf-8") as f:
     json.dump(output, f, ensure_ascii=False, indent=4)
 
-print("已成功將全面、完整的真實台股資料寫入 stock_data.json")
+print(f"成功更新！總計寫入 {len(stock_list)} 筆真實上市股票資料。")
