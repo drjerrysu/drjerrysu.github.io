@@ -2,7 +2,6 @@ name: Auto Update Stock Data
 
 on:
   schedule:
-    # 每週一至週五，台灣時間 18:00 執行
     - cron: '0 10 * * 1-5'
   workflow_dispatch:
 
@@ -26,7 +25,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: pip
 
       - name: 安裝 Python 套件
         run: |
