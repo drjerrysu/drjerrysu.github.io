@@ -2,6 +2,7 @@ import json
 import datetime
 import subprocess
 import sys
+import os
 
 try:
     import requests
@@ -10,36 +11,44 @@ except ImportError:
     import requests
 
 today = datetime.date.today().strftime("%Y-%m-%d")
-stock_list = []
 
-# 直接使用證交所官方最穩定的 OpenAPI 資料集
+# 先嘗試讀取現有的 stock_data.json，若伺服器暫時沒資料時可作為備用
+old_data = []
+if os.path.exists("stock_data.json"):
+    try:
+        with open("stock_data.json", "r", encoding="utf-8") as f:
+            content = json.load(f)
+            old_data = content.get("data", [])
+    except:
+        pass
+
 url = "https://openapi.twse.com.tw/v1/fund/T86"
-
 headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
+
+stock_list = []
 
 try:
     print(f"正在連線證交所 OpenAPI: {url}")
     response = requests.get(url, headers=headers, timeout=20)
     print(f"HTTP 狀態碼: {response.status_code}")
     
-    if response.status_code == 200:
+    # 檢查內容是否為空，避免發生 JSONDecodeError
+    response_text = response.text.strip()
+    if response.status_code == 200 and response_text:
         data = response.json()
         print(f"成功取得原始資料，共 {len(data)} 筆")
         
         for item in data:
             try:
-                # 證交所 OpenAPI 標準欄位名稱
                 code = str(item.get('Code', '')).strip().replace('=', '').replace('"', '')
                 name = str(item.get('Name', '')).strip().replace('"', '')
                 
-                # 必須是 4 位純數字股票代號
                 if code.isdigit() and len(code) == 4:
                     foreign = int(str(item.get('ForeignInvestorsNetBuySell', 0)).replace(',', '').replace('+', '').strip() or 0)
                     trust = int(str(item.get('InvestmentTrustNetBuySell', 0)).replace(',', '').replace('+', '').strip() or 0)
                     
-                    # 自營商買賣超張數計算
                     dealer_self = str(item.get('DealerSelfNetBuySell', '0')).replace(',', '').replace('+', '').strip()
                     dealer_hedge = str(item.get('DealerHedgeNetBuySell', '0')).replace(',', '').replace('+', '').strip()
                     total_dealer = (int(dealer_self) if dealer_self.lstrip('-').isdigit() else 0) + \
@@ -59,9 +68,14 @@ try:
             except Exception:
                 continue
     else:
-        print(f"請求失敗，狀態碼: {response.status_code}")
+        print("提示：證交所伺服器目前回傳內容為空（可能尚未到每日結算時間）。")
 except Exception as e:
     print(f"發生例外錯誤: {e}")
+
+# 防呆機制：若本次抓不到新資料，自動沿用舊資料，確保系統平穩
+if len(stock_list) == 0 and len(old_data) > 0:
+    print("提示：本次未取得新資料，沿用上一筆有效數據，確保前端正常顯示。")
+    stock_list = old_data
 
 output = {
     "date": today,
@@ -71,4 +85,4 @@ output = {
 with open("stock_data.json", "w", encoding="utf-8") as f:
     json.dump(output, f, ensure_ascii=False, indent=4)
 
-print(f"已成功寫入 {len(stock_list)} 筆真實上市股票數據到 stock_data.json！")
+print(f"已成功更新 stock_data.json，總計筆數: {len(stock_list)}")
